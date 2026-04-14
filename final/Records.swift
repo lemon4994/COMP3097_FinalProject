@@ -1,20 +1,39 @@
-//
-//  Records.swift
-//  final
-//
-//  Created by Tech on 2026-04-07.
-//
-
 import SwiftUI
+import CoreData
 
 struct Records: View {
+    
+    @FetchRequest(
+        entity: Player.entity(),
+        sortDescriptors: [
+            NSSortDescriptor(keyPath: \Player.wins, ascending: false),
+            NSSortDescriptor(keyPath: \Player.streak, ascending: false)
+        ]
+    ) var players: FetchedResults<Player>
+    
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
-    }
-}
-
-struct Records_Previews: PreviewProvider {
-    static var previews: some View {
-        Records()
+        VStack {
+            
+            Text("Leaderboard")
+                .font(.largeTitle)
+            
+            List {
+                ForEach(players, id: \.self) { player in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(player.name ?? "Unknown")
+                            Text("Wins: \(player.wins) Streak: \(player.streak)")
+                                .font(.subheadline)
+                        }
+                        
+                        Spacer()
+                        
+                        if player.isOnStreak {
+                            Text("🔥")
+                        }
+                    }
+                }
+            }
+        }
     }
 }

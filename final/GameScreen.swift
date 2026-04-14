@@ -1,145 +1,207 @@
-//
-//  Game Screen.swift
-//  final
-//
-//  Created by Tech on 2026-04-07.
-//
-
 import SwiftUI
-
-enum HintState {
-    case empty
-    case correct
-    case correctNumber
-    case incorrect
-}
+import CoreData
 
 struct GameScreen: View {
     
-    @State private var solution = [1,2,3,4,5]
-    @State private var currentRow = 0
-    @State private var guesses = Array(repeating: "", count: 25)
-    @State private var feedback = Array(repeating: Color.clear, count: 25)
+    let onFinished: () -> Void
+    
+    @Environment(\.managedObjectContext) private var context
+    
+    @FetchRequest(
+        entity: Player.entity(),
+        sortDescriptors: []
+    ) var players: FetchedResults<Player>
+    
+    @State private var solution: [Int] = []
+    //variables!!
+    @State private var currentGuess = Array(repeating: "", count: 5)
+    @State private var history: [[Color]] = []
+    @State private var historyValues: [[String]] = []
+    
+    @State private var showWinPopup = false
+    @State private var showLosePopup = false
+    
+    @State private var playerName = ""
+    
+    @FocusState private var focusedIndex: Int? //for user experience
+    
+    let maxGuesses = 5
+    
+    var guessesLeft: Int {
+        maxGuesses - history.count
+    }
     
     var body: some View {
-        VStack(spacing: 10) {
-            Text("Number Game")
-
-            ForEach(0..<5, id: \.self) { row in
+        VStack(spacing: 15) {
+            
+            // This part will take your old guesses and generate a row of squares as hints
+            ForEach(0..<history.count, id: \.self) { row in
                 HStack {
                     ForEach(0..<5, id: \.self) { col in
-                        let index = row * 5 + col
-
-                        TextField("", text: $guesses[index])
-                            .frame(width: 40, height: 40)
-                            .multilineTextAlignment(.center)
-                            .background(feedback[index])
-                            .overlay(
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .stroke(row == currentRow ? Color.blue : Color.gray, lineWidth: 2)
-                                    )
+                        
+                        ZStack {
+                            Rectangle()
+                                .fill(history[row][col])
+                                .frame(width: 30, height: 30)
+                                .cornerRadius(4)
+                            
+                            Text(historyValues[row][col])
+                                .font(.caption)
+                        }
                     }
                 }
-                .disabled(row != currentRow)
             }
-            Button("Submit") {
-                submitRow()
-            }
-        }
-    }
-    func submitRow() {
-        let start = currentRow * 5
-        let end = start + 5
-        let rowValues = guesses[start..<end].compactMap {Int($0)}
-        
-        guard rowValues.count == 5 else {return}
-        
-        for i in 0..<5 {
-                let index = start + i
-                let value = rowValues[i]
-
-                if value == solution[i] {
-                    feedback[index] = .green
-                } else if solution.contains(value) {
-                    feedback[index] = .yellow
-                } else {
-                    feedback[index] = .red
-                }
-            }
-        
-        if currentRow < 6 {
-                currentRow += 1
-            }
-    }
-    
-}
-
-/*
-struct GameScreen: View {
-    
-    @State private var currentGuess: [Int] = []
-    
-    @State private var feedback = Array(repeating: HintState.empty, count: 35)
-    
-
-    var body: some View {
-        VStack {
-            Text("Enter your answer")
-            ForEach(0..<7, id: \.self) { row in
-                HStack {
-                    ForEach(0..<5, id: \.self) { col in
-                        let index = row * 5 + col
-
-                        TextField(
-                            "",
-                            text: Binding(
-                                get: { guesses[index] },
-                                set: { guesses[index] = $0 }
-                            )
-                        )
-                        .frame(width:40, height:40)
+            
+            // This is where the actual text boxes are created
+            HStack {
+                ForEach(0..<5, id: \.self) { i in
+                    TextField("", text: $currentGuess[i])
+                        .frame(width: 40, height: 40)
                         .multilineTextAlignment(.center)
                         .keyboardType(.numberPad)
+                        .focused($focusedIndex, equals: i) //when a number is entered it automatically moves to the next field
                         .overlay(
                             RoundedRectangle(cornerRadius: 5)
-                                .stroke(boxColors(feedback[index]), lineWidth: 2)
+                                .stroke(Color.blue, lineWidth: 2)
                         )
-                    }
+                        .onChange(of: currentGuess[i]) { newValue in
+                            let trimmed = String(newValue.prefix(1))
+                            currentGuess[i] = trimmed
+                            
+                            if !trimmed.isEmpty, i < 4 {
+                                focusedIndex = i + 1
+                            }
+                        }
                 }
             }
-            Button("Submit Guess") {
-                let guessNumbers = guesses[currentRow].compactMap {Int($0)}
-                guard guessNumbers.count == 5 else {return}
-                currentGuess = guessNumbers
-                checkGuess(guessNumbers)
-                
-                if currentRow < 6 {
-                    currentRow += 1
+            
+            HStack {
+                Button("Submit") {
+                    submitGuess()
                 }
-              }
-            .padding
+                
+                Text("Left: \(guessesLeft)")
+            }
         }
         .padding()
-        
+        .onAppear {
+            resetGame()
+            focusedIndex = 0
+        }
+        .sheet(isPresented: $showWinPopup) {
+            resultSheet(title: "You Win!", isWin: true)
+        }
+        .sheet(isPresented: $showLosePopup) {
+            resultSheet(title: "You Lose!", isWin: false)
+        }
     }
     
-}
-func answerGenerator() -> [Int] {
-    return (0..<5).map { _ in Int.random(in: 0...9)}
-}
-
-
-func boxColors(_ state: HintState) -> Color {
-    switch state {
-    case .empty: return .gray
-    case .correct: return .green
-    case .correctNumber: return .yellow
-    case .incorrect: return .red
+    func submitGuess() {
+        guard history.count < maxGuesses else { return }
+        
+        let values = currentGuess.compactMap { Int($0) }
+        guard values.count == 5 else { return }
+        
+        var rowColors: [Color] = []
+        //compares the guess to the solution and generates hints
+        for i in 0..<5 {
+            if values[i] == solution[i] {
+                rowColors.append(.green)
+            } else if solution.contains(values[i]) {
+                rowColors.append(.yellow)
+            } else {
+                rowColors.append(.red)
+            }
+        }
+        
+        let isWin = rowColors.allSatisfy { $0 == .green }
+        
+        history.append(rowColors)
+        historyValues.append(currentGuess)
+        currentGuess = Array(repeating: "", count: 5)
+        focusedIndex = 0
+        
+        if isWin {
+            showWinPopup = true
+            return
+        }
+        
+        if history.count >= maxGuesses {
+            showLosePopup = true
+        }
     }
-}
-*/
-struct Game_Screen_Previews: PreviewProvider {
-    static var previews: some View {
-        GameScreen()
+    
+    @ViewBuilder
+    func resultSheet(title: String, isWin: Bool) -> some View {
+        VStack(spacing: 20) {
+            
+            Text(title)
+                .font(.largeTitle)
+            
+            if isWin {
+                Text("You win!")
+            } else {
+                Text("Better luck next time!")
+            }
+            
+            TextField("Enter name", text: $playerName)
+                .textFieldStyle(.roundedBorder)
+                .padding()
+            
+            Button("Continue") {
+                savePlayer(isWin: isWin)
+                
+                showWinPopup = false
+                showLosePopup = false
+                
+                onFinished()
+            }
+        }
+        .padding()
+    }
+    
+    func resetGame() {
+        solution = (0..<5).map { _ in Int.random(in: 0...9) }
+        
+        currentGuess = Array(repeating: "", count: 5)
+        history = []
+        historyValues = []
+        
+        playerName = ""
+        
+        showWinPopup = false
+        showLosePopup = false
+        
+        focusedIndex = nil
+    }
+    
+    func savePlayer(isWin: Bool) {
+        let player: Player
+        
+        if let existing = players.first(where: { $0.name == playerName }) {
+            player = existing
+        } else {
+            player = Player(context: context)
+            player.name = playerName
+            player.wins = 0
+            player.streak = 0
+            player.isOnStreak = false
+        }
+        
+        if isWin {
+            player.wins += 1
+            
+            if player.isOnStreak {
+                player.streak += 1
+            } else {
+                player.streak = 1
+                player.isOnStreak = true
+            }
+        } else {
+            player.isOnStreak = false
+            player.streak = 0
+        }
+        
+        try? context.save()
     }
 }

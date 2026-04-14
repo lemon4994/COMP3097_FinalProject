@@ -1,34 +1,35 @@
-//
-//  ContentView.swift
-//  final
-//
-//  Created by Tech on 2026-04-07.
-//
-
 import SwiftUI
 import CoreData
 
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
     
+    @State private var showGame = false
+    @State private var showRecords = false
     
     var body: some View {
         NavigationStack {
-            VStack{
+            VStack(spacing: 20) {
+                
                 Text("Guessing Game")
-                NavigationLink("Start Game") {
-                    GameScreen()
+                    .font(.largeTitle)
+                
+                Button("Start Game") {
+                    showGame = true
                 }
-                NavigationLink("View Records") {
-                    Records()
+                
+                Button("View Records") {
+                    showRecords = true
                 }
             }
+            .navigationDestination(isPresented: $showGame) {
+                GameScreen(onFinished: {
+                    showGame = false
+                    showRecords = true
+                })
+            }
+            .navigationDestination(isPresented: $showRecords) {
+                Records()
+            }
         }
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
     }
 }
